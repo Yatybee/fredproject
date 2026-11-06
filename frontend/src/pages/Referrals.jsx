@@ -73,7 +73,7 @@ export default function Referrals() {
                       <tr key={r.id} onClick={() => navigate(`/referrals/${r.id}`)} className="cursor-pointer hover:bg-slate-50">
                         <td className="px-4 py-3 text-slate-500">{r.id}</td>
                         <td className="px-4 py-3">
-                          <Link to={`/referrals/${r.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-navy-900 hover:text-blue-600">{r.patient_name}</Link>
+                          <Link to={`/referrals/${r.id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-ink hover:text-blue-600">{r.patient_name}</Link>
                           <p className="max-w-xs truncate text-xs text-slate-500">{r.reason}</p>
                         </td>
                         <td className="hidden px-4 py-3 text-slate-700 md:table-cell">{r.facility_name}</td>

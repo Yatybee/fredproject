@@ -1,18 +1,25 @@
 @import "tailwindcss";
 
+/* dark: utilities follow the app's own theme switch (data-theme), not the OS setting. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
 /* Design tokens. Navy for text and structure, a calm medical blue for actions and teal for
    positive / completed states. The "blue" and "navy" utility names are remapped here so every
    page follows the theme without per-component edits. */
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-heading: "Manrope Variable", "Manrope", "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
 
-  --color-blue-50: #eef5fd;
-  --color-blue-100: #dbeafb;
-  --color-blue-200: #bcd7f6;
-  --color-blue-500: #3b82d6;
-  --color-blue-600: #2563b0;
-  --color-blue-700: #1d5192;
-  --color-blue-800: #173f73;
+  --color-blue-50: #eef0ff;
+  --color-blue-100: #e0e4ff;
+  --color-blue-200: #c3caff;
+  --color-blue-500: #5b6cf0;
+  --color-blue-600: #4255e6;
+  --color-blue-700: #3544c8;
+  --color-blue-800: #2b379e;
 
   --color-navy-50: #eef2f7;
   --color-navy-100: #dbe4ee;
@@ -21,18 +28,111 @@
   --color-navy-900: #0f2a47;
   --color-navy-950: #0a1d33;
 
-  --color-shell: #f4f7fa;
-  --shadow-card: 0 1px 2px rgba(15, 42, 71, 0.04), 0 1px 3px rgba(15, 42, 71, 0.05);
-  --shadow-card-hover: 0 4px 14px rgba(15, 42, 71, 0.08);
+  --color-shell: #eff1f8;
+  /* Semantic colours that change with the theme: card/page-chrome surface and heading ink. */
+  --color-surface: #ffffff;
+  --color-ink: #0f2a47;
+  --shadow-card: 0 1px 2px rgba(30, 41, 90, 0.04), 0 4px 16px rgba(30, 41, 90, 0.05);
+  --shadow-card-hover: 0 6px 22px rgba(30, 41, 90, 0.10);
 }
 
 body {
   @apply bg-shell text-slate-800 antialiased;
+  font-family: var(--font-sans);
+}
+
+/* Manrope for headings and brand names; everything else (body, nav, buttons, forms, tables,
+   labels, statistics) stays Inter. Fonts are theme-independent, so light and dark match. */
+@layer base {
+  h1, h2, h3, h4, h5, h6 { font-family: var(--font-heading); }
+  h1, h2 { font-weight: 700; letter-spacing: -0.025em; }
+  h3, h4 { font-weight: 600; }
+}
+
+/* ---------- Dark mode ----------
+   Light is the default. Dark is switched on by data-theme="dark" on <html> (see src/theme.jsx).
+   Instead of editing every component, the colour tokens the components already use are
+   redefined here: the slate scale is inverted (so text-slate-900 becomes near-white and
+   bg-slate-50 a slightly raised dark), tinted badge/alert backgrounds become dark tints, and
+   their text becomes a light tint. Screen only, so printing always stays light. */
+@media screen {
+  :root[data-theme="dark"] {
+    color-scheme: dark; /* native date pickers, select lists and scrollbars follow the theme */
+
+    --color-shell: #0b1220;
+    --color-surface: #111a2b;
+    --color-ink: #f1f5f9;
+
+    --color-slate-50: #162033;
+    --color-slate-100: #1b2740;
+    --color-slate-200: #26334d;
+    --color-slate-300: #33425f;
+    --color-slate-400: #7b8aa5;
+    --color-slate-500: #9aa7bd;
+    --color-slate-600: #b3bed0;
+    --color-slate-700: #cbd5e3;
+    --color-slate-800: #e2e8f0;
+    --color-slate-900: #f1f5f9;
+
+    --color-blue-50: #1a1f45;
+    --color-blue-100: #232a5c;
+    --color-blue-200: #343e8a;
+    --color-blue-800: #a5b4fc;
+    --color-navy-50: #1a2a42;
+    --color-navy-700: #8fb3dc;
+    --color-navy-900: #1e3a5f; /* only used as a background (tooltips, toasts, login panel) */
+
+    --color-red-50: #2a1519;
+    --color-red-100: #3d1a20;
+    --color-red-200: #7f1d1d;
+    --color-red-700: #fca5a5;
+    --color-red-800: #fca5a5;
+    --color-emerald-50: #0f2a20;
+    --color-emerald-200: #065f46;
+    --color-emerald-800: #6ee7b7;
+    --color-amber-50: #2b2210;
+    --color-amber-700: #fbbf24;
+    --color-amber-800: #fcd34d;
+    --color-teal-50: #0f2a2a;
+    --color-teal-800: #5eead4;
+    --color-orange-50: #2e1c0e;
+    --color-orange-800: #fdba74;
+  }
+
+  /* Mid-tone text colours that are also used as button backgrounds elsewhere, so they are
+     lightened only where they act as text (links, overdue dates, nav highlight). */
+  :root[data-theme="dark"] .text-blue-600,
+  :root[data-theme="dark"] .text-blue-700,
+  :root[data-theme="dark"] .hover\:text-blue-600:hover,
+  :root[data-theme="dark"] .hover\:text-blue-700:hover { color: #98a6ff; }
+  :root[data-theme="dark"] .text-red-500,
+  :root[data-theme="dark"] .text-red-600,
+  :root[data-theme="dark"] .hover\:text-red-600:hover { color: #f87171; }
+  :root[data-theme="dark"] .text-amber-600 { color: #fbbf24; }
+  :root[data-theme="dark"] .text-teal-600 { color: #2dd4bf; }
+
+  :root[data-theme="dark"] :focus-visible { outline-color: #8b9bff; }
+}
+
+/* Smooth cross-fade, only while the toggle is switching (class added/removed in theme.jsx). */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow, outline-color !important;
+  transition-duration: 300ms !important;
+  transition-timing-function: ease !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after { transition: none !important; }
 }
 
 /* visible keyboard focus everywhere */
 :focus-visible {
-  outline: 2px solid #2563b0;
+  outline: 2px solid #4255e6;
   outline-offset: 2px;
 }
 
@@ -53,3 +153,8 @@ textarea:focus-visible {
     padding: 0 !important;
   }
 }
+
+/* Landing hero: route pins settle in once on load */
+@keyframes pin-in { from { opacity: 0; transform: translateY(6px) scale(0.95); } to { opacity: 1; transform: none; } }
+.pin-in { animation: pin-in 420ms cubic-bezier(0.23, 1, 0.32, 1) backwards; animation-delay: var(--d, 0ms); }
+@media (prefers-reduced-motion: reduce) { .pin-in { animation: none; } }

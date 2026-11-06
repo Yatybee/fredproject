@@ -6,12 +6,15 @@ import HeaderTools from './HeaderTools.jsx'
 
 const cx = (...c) => c.filter(Boolean).join(' ')
 
-export function Card({ title, action, children, className = '', padded = true }) {
+export function Card({ title, subtitle, action, children, className = '', padded = true }) {
   return (
-    <section className={cx('rounded-xl border border-slate-200/70 bg-white shadow-card', className)}>
+    <section className={cx('rounded-2xl border border-slate-200/50 bg-surface shadow-card', className)}>
       {(title || action) && (
-        <div className="flex items-center justify-between gap-3 px-5 pb-1 pt-4">
-          <h2 className="text-sm font-semibold text-navy-900">{title}</h2>
+        <div className="flex items-start justify-between gap-3 px-5 pb-1 pt-5">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-ink">{title}</h2>
+            {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
+          </div>
           {action}
         </div>
       )}
@@ -23,8 +26,8 @@ export function Card({ title, action, children, className = '', padded = true })
 export function PageHeader({ title, subtitle, actions }) {
   return (
     <div className="mb-6 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-navy-900">{title}</h1>
+      <div className="min-w-0 flex-1 basis-72">
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
       </div>
       <div className="no-print flex flex-wrap items-center gap-3">
@@ -36,8 +39,8 @@ export function PageHeader({ title, subtitle, actions }) {
 }
 
 const VARIANTS = {
-  primary: 'bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus-visible:outline-blue-600',
-  secondary: 'bg-white text-slate-700 ring-1 ring-inset ring-slate-300 shadow-sm hover:bg-slate-50',
+  primary: 'bg-blue-600 text-white shadow-sm shadow-blue-600/25 hover:bg-blue-700 focus-visible:outline-blue-600',
+  secondary: 'bg-surface text-slate-700 ring-1 ring-inset ring-slate-300 shadow-sm hover:bg-slate-50',
   danger: 'bg-red-600 text-white hover:bg-red-700',
   ghost: 'text-slate-600 hover:bg-slate-100',
 }
@@ -48,7 +51,7 @@ export function Button({ variant = 'primary', loading, icon: Icon, children, cla
       {...rest}
       disabled={loading || rest.disabled}
       className={cx(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60',
+        'inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60',
         size === 'sm' ? 'px-2.5 py-1.5 text-xs' : 'px-4 py-2 text-sm',
         VARIANTS[variant],
         className,
@@ -120,7 +123,7 @@ export function Async({ state, children }) {
 }
 
 // ---------- form controls ----------
-const inputCls = 'block w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-600 disabled:bg-slate-50'
+const inputCls = 'block w-full rounded-lg border-0 bg-surface px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-600 disabled:bg-slate-50'
 
 export function Field({ label, hint, required, children }) {
   const id = useId()
@@ -155,9 +158,9 @@ export function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-navy-950/50 p-0 sm:items-center sm:p-4" onMouseDown={onClose}>
       <div role="dialog" aria-modal="true" aria-label={title} onMouseDown={(e) => e.stopPropagation()}
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:rounded-xl">
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-surface shadow-xl sm:rounded-xl">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <h2 className="text-base font-semibold text-navy-900">{title}</h2>
+          <h2 className="text-base font-semibold text-ink">{title}</h2>
           <button onClick={onClose} aria-label="Close" className="rounded-lg p-1 text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button>
         </div>
         <div className="p-5">{children}</div>
@@ -193,24 +196,51 @@ export function ToastProvider({ children }) {
 }
 
 const TONES = {
-  blue: { icon: 'bg-blue-50 text-blue-600', bar: 'bg-blue-500' },
-  amber: { icon: 'bg-amber-50 text-amber-600', bar: 'bg-amber-400' },
-  red: { icon: 'bg-red-50 text-red-600', bar: 'bg-red-400' },
-  green: { icon: 'bg-teal-50 text-teal-600', bar: 'bg-teal-500' },
-  navy: { icon: 'bg-navy-50 text-navy-700', bar: 'bg-navy-700' },
+  blue: { icon: 'text-blue-600', bar: 'bg-blue-500' },
+  amber: { icon: 'text-amber-600', bar: 'bg-amber-400' },
+  red: { icon: 'text-red-600', bar: 'bg-red-400' },
+  green: { icon: 'text-teal-600', bar: 'bg-teal-500' },
+  navy: { icon: 'text-navy-700', bar: 'bg-navy-700' },
 }
 
-/** KPI tile: small tinted icon, big number, hint line and an optional thin progress indicator (0-100). */
-export function StatCard({ label, value, hint, icon: Icon, tone = 'blue', progress, to }) {
+const DELTA = {
+  up: 'bg-emerald-50 text-emerald-800',
+  down: 'bg-red-50 text-red-800',
+  neutral: 'bg-slate-100 text-slate-600',
+}
+
+/** Small rounded "+12.4%" style pill. tone: up (green) | down (red) | neutral. */
+export function DeltaPill({ tone = 'neutral', children, onPrimary = false, className = '' }) {
+  return (
+    <span className={cx('inline-flex items-center whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-semibold',
+      onPrimary ? 'bg-white/20 text-white' : DELTA[tone], className)}>{children}</span>
+  )
+}
+
+/**
+ * KPI tile: icon box, optional change pill, label, big number and hint.
+ * variant="primary" is the solid blue highlight tile. `delta` = { text, tone }.
+ * `progress` (0-100) is an optional thin bar, kept for pages that use it.
+ */
+export function StatCard({ label, value, hint, icon: Icon, tone = 'blue', progress, to, delta, variant = 'default' }) {
   const t = TONES[tone] || TONES.blue
+  const primary = variant === 'primary'
   const body = (
     <>
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-medium text-slate-500">{label}</p>
-        {Icon && <span className={cx('grid h-9 w-9 place-items-center rounded-lg', t.icon)}><Icon className="h-[18px] w-[18px]" /></span>}
+      {(Icon || delta) && (
+        <div className="flex items-start justify-between gap-2">
+          {Icon
+            ? <span className={cx('grid h-11 w-11 place-items-center rounded-xl',
+              primary ? 'bg-white text-blue-600 shadow-sm' : cx('bg-slate-50 ring-1 ring-slate-200/70', t.icon))}><Icon className="h-5 w-5" /></span>
+            : <span />}
+          {delta && <DeltaPill tone={delta.tone} onPrimary={primary}>{delta.text}</DeltaPill>}
+        </div>
+      )}
+      <p className={cx('text-sm font-medium', Icon || delta ? 'mt-4' : '', primary ? 'text-white/85' : 'text-slate-500')}>{label}</p>
+      <div className="mt-1.5 flex flex-wrap items-end gap-x-3 gap-y-0.5">
+        <p className={cx('text-3xl font-semibold leading-none tracking-tight', primary ? 'text-white' : 'text-ink')}>{value}</p>
+        {hint && <p className={cx('pb-0.5 text-xs leading-tight', primary ? 'text-white/75' : 'text-slate-500')}>{hint}</p>}
       </div>
-      <p className="mt-3 text-3xl font-semibold tracking-tight text-navy-900">{value}</p>
-      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
       {progress != null && (
         <div className="mt-3 h-1 overflow-hidden rounded-full bg-slate-100" role="presentation">
           <div className={cx('h-full rounded-full transition-all duration-500', t.bar)} style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
@@ -218,8 +248,11 @@ export function StatCard({ label, value, hint, icon: Icon, tone = 'blue', progre
       )}
     </>
   )
-  const cls = 'block rounded-xl border border-slate-200/70 bg-white p-5 shadow-card transition-shadow duration-200'
+  const cls = cx('block rounded-2xl p-5 transition-shadow duration-200',
+    primary
+      ? 'bg-gradient-to-br from-blue-700 via-blue-600 to-blue-500 text-white shadow-lg shadow-blue-600/25'
+      : 'border border-slate-200/50 bg-surface shadow-card')
   return to
-    ? <Link to={to} className={cx(cls, 'hover:shadow-card-hover')}>{body}</Link>
+    ? <Link to={to} className={cx(cls, primary ? 'hover:shadow-xl hover:shadow-blue-600/30' : 'hover:shadow-card-hover')}>{body}</Link>
     : <div className={cls}>{body}</div>
 }

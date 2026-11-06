@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './auth.jsx'
 import Layout from './components/Layout.jsx'
 import { Spinner } from './components/ui.jsx'
+import Landing from './pages/Landing.jsx'
 import Login from './pages/Login.jsx'
 import Dashboard from './pages/Dashboard.jsx'
 import NewReferral from './pages/NewReferral.jsx'
@@ -26,7 +27,16 @@ function Guard({ perm, children }) {
 export default function App() {
   const { user, ready } = useAuth()
   if (!ready) return <div className="grid min-h-screen place-items-center"><Spinner /></div>
-  if (!user) return <Login />
+  // Signed out: the public landing page at "/", and the sign-in form for every other address
+  // (so a deep link such as /referrals/5 still opens that page right after signing in).
+  if (!user) {
+    return (
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="*" element={<Login />} />
+      </Routes>
+    )
+  }
 
   return (
     <Routes>

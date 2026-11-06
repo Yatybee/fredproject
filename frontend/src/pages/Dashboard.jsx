@@ -1,20 +1,21 @@
 import { Suspense, lazy, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowRight, Bell, Building2, CalendarClock, CheckCircle2, ClipboardList, Clock,
-  FilePlus2, Lightbulb, TrendingUp,
+  Activity, AlertTriangle, ArrowRight, Bell, Building2, CalendarClock, CheckCircle2, ClipboardList, Clock,
+  FilePlus2, Lightbulb, Siren, TrendingUp,
 } from 'lucide-react'
 import { api } from '../api.js'
 import { useAuth } from '../auth.jsx'
-import { Async, Button, Card, EmptyState, PageHeader, Spinner, StatCard, StatusBadge, UrgencyBadge } from '../components/ui.jsx'
+import { Async, Button, Card, DeltaPill, EmptyState, PageHeader, Spinner, StatCard, StatusBadge, UrgencyBadge } from '../components/ui.jsx'
 import { buildInsights, buildTrend } from '../insights.js'
 import { daysFromToday, fmtDate, useLoad } from '../lib.js'
 
 // recharts is large; the charts load after the first paint
 const charts = import('../components/DashboardCharts.jsx')
 const TrendChart = lazy(() => charts.then((m) => ({ default: m.TrendChart })))
-const StatusDonut = lazy(() => charts.then((m) => ({ default: m.StatusDonut })))
-const FacilityBars = lazy(() => charts.then((m) => ({ default: m.FacilityBars })))
+const ActivityBars = lazy(() => charts.then((m) => ({ default: m.ActivityBars })))
+const StatusRadial = lazy(() => charts.then((m) => ({ default: m.StatusRadial })))
+const FacilityBubbles = lazy(() => charts.then((m) => ({ default: m.FacilityBubbles })))
 
 const greeting = () => {
   const h = new Date().getHours()
@@ -23,6 +24,24 @@ const greeting = () => {
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 const PERIODS = [7, 30, 90]
+
+const longDate = () => new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+
+const URGENCY_ROWS = [
+  { key: 'ROUTINE', label: 'Routine', icon: Activity },
+  { key: 'URGENT', label: 'Urgent', icon: AlertTriangle },
+  { key: 'EMERGENCY', label: 'Emergency', icon: Siren },
+]
+const URGENCY_TONE = { ROUTINE: 'neutral', URGENT: 'neutral', EMERGENCY: 'down' }
+
+/** Referred vs completed per month, for the months the API reports (stats.by_month). */
+function buildMonthly(stats, referrals) {
+  return (stats.by_month || []).map(([ym, count]) => ({
+    label: new Date(`${ym}-01T00:00:00`).toLocaleDateString(undefined, { month: 'short' }),
+    referred: count,
+    completed: referrals.filter((r) => r.referral_date.startsWith(ym) && r.status === 'COMPLETED').length,
+  }))
+}
 
 const TONE = {
   red: { box: 'bg-red-50 text-red-600', icon: AlertTriangle },
@@ -37,10 +56,10 @@ function InsightTile({ insight }) {
   const tone = TONE[insight.tone] || TONE.navy
   const Icon = INSIGHT_ICON[insight.id] || tone.icon
   return (
-    <div className="flex gap-3 rounded-lg border border-slate-200/70 bg-white p-4 transition-shadow duration-200 hover:shadow-card-hover">
+    <div className="flex gap-3 rounded-xl border border-slate-200/70 bg-surface p-4 transition-shadow duration-200 hover:shadow-card-hover">
       <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${tone.box}`}><Icon className="h-[18px] w-[18px]" /></span>
       <div className="min-w-0">
-        <p className="text-sm font-semibold text-navy-900">{insight.title}</p>
+        <p className="text-sm font-semibold text-ink">{insight.title}</p>
         <p className="mt-0.5 text-[13px] leading-snug text-slate-500">{insight.detail}</p>
         {insight.action && (
           <Link to={insight.action.to} className="mt-2 inline-flex items-center gap-1 text-[13px] font-medium text-blue-600 hover:text-blue-700 hover:underline">
@@ -61,7 +80,7 @@ function Segmented({ value, onChange, options, label }) {
     <div role="group" aria-label={label} className="inline-flex rounded-lg bg-slate-100 p-0.5 text-xs font-medium">
       {options.map((o) => (
         <button key={o} type="button" onClick={() => onChange(o)} aria-pressed={value === o}
-          className={`rounded-md px-2.5 py-1 transition-colors ${value === o ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-500 hover:text-navy-900'}`}>
+          className={`rounded-md px-2.5 py-1 transition-colors ${value === o ? 'bg-surface text-ink shadow-sm' : 'text-slate-500 hover:text-ink'}`}>
           {o} days
         </button>
       ))}
@@ -95,13 +114,19 @@ export default function Dashboard() {
           if (!nextFollow[f.referral_id] || f.scheduled_for < nextFollow[f.referral_id]) nextFollow[f.referral_id] = f.scheduled_for
         })
         const recent = referrals.slice(0, 6)
+        const monthly = buildMonthly(stats, referrals)
+        let trendDelta = null
+        if (trend.previous > 0) {
+          const pct = Math.round((100 * (trend.current - trend.previous)) / trend.previous)
+          trendDelta = { text: `${pct > 0 ? '+' : ''}${pct}%`, tone: pct >= 0 ? 'up' : 'down' }
+        }
         const summary = stats.total === 0
           ? 'No referrals have been recorded yet. Create the first one to start tracking.'
           : `${plural(pending, 'referral')} pending, ${overdue.length} overdue and ${plural(followToday, 'follow-up')} due today or earlier.`
 
         return (
           <>
-            <PageHeader title={`${greeting()}, ${user.username}`} subtitle={summary}
+            <PageHeader title={`${greeting()}, ${user.username}`} subtitle={`${longDate()} · ${summary}`}
               actions={(
                 <>
                   {overdue.length > 0 && (
@@ -115,18 +140,66 @@ export default function Dashboard() {
               )} />
 
             <div className="space-y-6">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <StatCard label="Total referrals" value={stats.total} icon={ClipboardList} tone="navy" hint="All time" to="/referrals" />
-                <StatCard label="Completed referrals" value={completed} icon={CheckCircle2} tone="green" to="/referrals?status=COMPLETED"
-                  hint={stats.completion_rate != null ? `${stats.completion_rate}% completion rate` : 'None recorded yet'} progress={stats.completion_rate ?? 0} />
-                <StatCard label="Pending referrals" value={pending} icon={Clock} tone="amber" to="/referrals?status=PENDING"
-                  hint="Attendance not yet confirmed" progress={stats.total ? (100 * pending) / stats.total : 0} />
-                <StatCard label="Requiring follow-up" value={stats.needing_followup} icon={CalendarClock} tone={stats.followups_overdue ? 'red' : 'blue'} to="/follow-ups"
-                  hint={stats.followups_overdue ? `${stats.followups_overdue} follow-up(s) overdue` : `${stats.followups_pending} follow-up(s) scheduled`} />
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+                {/* left: KPI tiles and monthly activity */}
+                <div className="min-w-0 space-y-6">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <StatCard variant="primary" label="Total referrals" value={stats.total} icon={ClipboardList} to="/referrals"
+                      hint={`${trend.current} in the last ${days} days`} delta={trendDelta} />
+                    <StatCard label="Completed referrals" value={completed} icon={CheckCircle2} tone="green" to="/referrals?status=COMPLETED"
+                      hint={stats.total ? `of ${stats.total} referrals` : 'None recorded yet'}
+                      delta={stats.completion_rate != null ? { text: `${stats.completion_rate}%`, tone: 'up' } : null} />
+                    <StatCard label="Pending referrals" value={pending} icon={Clock} tone="amber" to="/referrals?status=PENDING"
+                      hint="Attendance not yet confirmed"
+                      delta={overdue.length ? { text: `${overdue.length} overdue`, tone: 'down' } : { text: 'On track', tone: 'up' }} />
+                    <StatCard label="Requiring follow-up" value={stats.needing_followup} icon={CalendarClock} tone={stats.followups_overdue ? 'red' : 'blue'} to="/follow-ups"
+                      hint={`${stats.followups_pending} scheduled`}
+                      delta={stats.followups_overdue ? { text: `${stats.followups_overdue} overdue`, tone: 'down' } : { text: 'On time', tone: 'up' }} />
+                  </div>
+
+                  <Card title="Referral activity" subtitle="Referrals received and completed each month">
+                    {monthly.length === 0
+                      ? <EmptyState icon={TrendingUp} title="No referrals yet" hint="Monthly activity appears once referrals are recorded." />
+                      : <div className="pt-3"><Suspense fallback={<ChartFallback />}><ActivityBars data={monthly} /></Suspense></div>}
+                  </Card>
+                </div>
+
+                {/* right: status rings and facility cluster */}
+                <div className="min-w-0 space-y-6">
+                  <Card title="Referral statistics" subtitle="Share of referrals by status">
+                    {stats.total === 0
+                      ? <EmptyState icon={ClipboardList} title="No referrals yet" hint="The chart fills in as referrals are created." />
+                      : (
+                        <>
+                          <div className="pt-3"><Suspense fallback={<ChartFallback h="h-56" />}>
+                            <StatusRadial byStatus={stats.by_status} total={stats.total} completionRate={stats.completion_rate} />
+                          </Suspense></div>
+                          <ul className="mt-4 space-y-2.5 border-t border-slate-100 pt-4">
+                            {URGENCY_ROWS.map(({ key, label, icon: Icon }) => {
+                              const n = stats.by_urgency[key] || 0
+                              return (
+                                <li key={key} className="flex items-center gap-3 text-sm">
+                                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-50 text-slate-600 ring-1 ring-slate-200/70"><Icon className="h-4 w-4" /></span>
+                                  <span className="flex-1 font-medium text-ink">{label}</span>
+                                  <span className="font-semibold text-ink">{n}</span>
+                                  <DeltaPill tone={URGENCY_TONE[key]} className="w-14 justify-center">{Math.round((100 * n) / stats.total)}%</DeltaPill>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </>
+                      )}
+                  </Card>
+
+                  <Card title="Referrals by facility" subtitle="Where patients are being sent">
+                    {stats.by_facility.length === 0
+                      ? <EmptyState icon={Building2} title="No referrals yet" hint="Shows which facilities receive the most patients." />
+                      : <div className="pt-3"><Suspense fallback={<ChartFallback h="h-44" />}><FacilityBubbles data={stats.by_facility.map(([name, count]) => ({ name, count }))} /></Suspense></div>}
+                  </Card>
+                </div>
               </div>
 
-              <Card title="Insights and recommendations"
-                action={<span className="text-xs text-slate-400">Calculated from current records</span>}>
+              <Card title="Insights and recommendations" subtitle="Calculated from current records">
                 {insights.length === 0 ? (
                   <EmptyState icon={Lightbulb} title="Not enough data for insights yet" hint="Insights about outstanding referrals, follow-ups, facilities and trends appear once referrals are recorded." />
                 ) : (
@@ -137,7 +210,7 @@ export default function Dashboard() {
               </Card>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-                <Card title="Referral trend" className="xl:col-span-2"
+                <Card title="Referral trend" subtitle="New referrals over time" className="xl:col-span-2"
                   action={<Segmented label="Trend period" value={days} onChange={setDays} options={PERIODS} />}>
                   {trend.current === 0 && trend.previous === 0 ? (
                     <EmptyState icon={TrendingUp} title={`No referrals in the last ${days} days`} hint="Choose a longer period, or create a referral." />
@@ -151,20 +224,6 @@ export default function Dashboard() {
                   )}
                 </Card>
 
-                <Card title="Status distribution">
-                  {stats.total === 0
-                    ? <EmptyState icon={ClipboardList} title="No referrals yet" hint="The chart fills in as referrals are created." />
-                    : <div className="pt-3"><Suspense fallback={<ChartFallback h="h-60" />}><StatusDonut byStatus={stats.by_status} total={stats.total} /></Suspense></div>}
-                </Card>
-              </div>
-
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-                <Card title="Referrals by receiving facility" className="xl:col-span-2">
-                  {stats.by_facility.length === 0
-                    ? <EmptyState icon={Building2} title="No referrals yet" hint="Shows which facilities receive the most patients." />
-                    : <div className="pt-3"><Suspense fallback={<ChartFallback h="h-44" />}><FacilityBars data={stats.by_facility.map(([name, count]) => ({ name, count }))} /></Suspense></div>}
-                </Card>
-
                 <Card title="Upcoming follow-ups" padded={false}
                   action={<Link to="/follow-ups" className="text-xs font-medium text-blue-600 hover:underline">View all</Link>}>
                   {followups.length === 0 ? <EmptyState icon={CalendarClock} title="No follow-ups scheduled" hint="Schedule follow-ups from a referral's detail page." /> : (
@@ -175,7 +234,7 @@ export default function Dashboard() {
                           <li key={f.id}>
                             <Link to={`/referrals/${f.referral_id}`} className="flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-slate-50">
                               <div className="min-w-0">
-                                <p className="truncate text-sm font-medium text-navy-900">{f.full_name}</p>
+                                <p className="truncate text-sm font-medium text-ink">{f.full_name}</p>
                                 <p className="truncate text-xs text-slate-400">{f.notes || f.facility_name}</p>
                               </div>
                               <span className={`whitespace-nowrap text-xs font-semibold ${n < 0 ? 'text-red-600' : n === 0 ? 'text-amber-600' : 'text-slate-600'}`}>
@@ -209,7 +268,7 @@ export default function Dashboard() {
                       <tbody className="divide-y divide-slate-100">
                         {recent.map((r) => (
                           <tr key={r.id} className="transition-colors hover:bg-slate-50/70">
-                            <td className="px-5 py-3 font-medium text-navy-900">{r.patient_name}</td>
+                            <td className="px-5 py-3 font-medium text-ink">{r.patient_name}</td>
                             <td className="hidden px-3 py-3 text-slate-500 sm:table-cell">#{r.id}</td>
                             <td className="hidden px-3 py-3 text-slate-600 md:table-cell">{r.facility_name}</td>
                             <td className="hidden whitespace-nowrap px-3 py-3 text-slate-600 sm:table-cell">{fmtDate(r.referral_date)}</td>
@@ -248,7 +307,7 @@ export default function Dashboard() {
                           <tr key={r.id} onClick={() => navigate(`/referrals/${r.id}`)} className="cursor-pointer transition-colors hover:bg-slate-50/70">
                             <td className="whitespace-nowrap px-5 py-3 text-slate-600">{fmtDate(r.expected_by)}</td>
                             <td className="px-3 py-3 text-slate-500">#{r.id}</td>
-                            <td className="px-3 py-3 font-medium text-navy-900">{r.patient_name}</td>
+                            <td className="px-3 py-3 font-medium text-ink">{r.patient_name}</td>
                             <td className="hidden px-3 py-3 text-slate-600 md:table-cell">{r.facility_name}</td>
                             <td className="px-3 py-3"><UrgencyBadge urgency={r.urgency} /></td>
                             <td className="whitespace-nowrap px-5 py-3 text-right font-semibold text-red-600">{-daysFromToday(r.expected_by)} day(s)</td>

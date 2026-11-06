@@ -103,7 +103,7 @@ export default function ReferralDetail() {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="text-2xl font-semibold text-navy-900">Referral #{r.id}</h1>
+                    <h1 className="text-2xl font-semibold text-ink">Referral #{r.id}</h1>
                     <StatusBadge status={r.status} /> <UrgencyBadge urgency={r.urgency} />
                     {overdue && <Badge className="bg-red-600 text-white ring-red-700">Overdue</Badge>}
                   </div>
@@ -177,7 +177,7 @@ export default function ReferralDetail() {
                     <ol className="relative space-y-5 border-l border-slate-200 pl-5">
                       {r.history.map((h) => (
                         <li key={h.id} className="relative">
-                          <span className="absolute -left-[26px] top-1 h-3 w-3 rounded-full ring-4 ring-white" style={{ background: STATUS[h.to_status]?.color }} />
+                          <span className="absolute -left-[26px] top-1 h-3 w-3 rounded-full ring-4 ring-surface" style={{ background: STATUS[h.to_status]?.color }} />
                           <p className="text-sm font-medium text-slate-900">{STATUS[h.to_status]?.label || h.to_status}</p>
                           <p className="text-xs text-slate-500">{fmtDateTime(h.at)} · {h.changed_by_name}</p>
                           {h.note && <p className="mt-1 text-sm text-slate-600">{h.note}</p>}

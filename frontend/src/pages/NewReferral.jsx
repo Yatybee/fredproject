@@ -91,7 +91,7 @@ export default function NewReferral() {
 
   const tab = (key, label, Icon) => (
     <button type="button" onClick={() => { setMode(key); setError('') }} aria-pressed={mode === key}
-      className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${mode === key ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+      className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${mode === key ? 'bg-surface text-ink shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
       <Icon className="h-4 w-4" /> {label}
     </button>
   )

@@ -42,7 +42,7 @@ export default function Facilities() {
                   <div className="flex min-w-0 items-center gap-3">
                     <span className="rounded-lg bg-blue-50 p-2.5 text-blue-700"><Building2 className="h-5 w-5" /></span>
                     <div className="min-w-0">
-                      <h3 className="truncate font-semibold text-navy-900">{f.name}</h3>
+                      <h3 className="truncate font-semibold text-ink">{f.name}</h3>
                       <p className="text-xs text-slate-500">{f.referral_count} referral(s)</p>
                     </div>
                   </div>

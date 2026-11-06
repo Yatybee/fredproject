@@ -3,9 +3,9 @@ import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveCo
 import { api } from '../api.js'
 import { Async, Button, Card, EmptyState, PageHeader, StatCard } from '../components/ui.jsx'
 import { STATUS, URGENCY, monthLabel, useLoad } from '../lib.js'
+import { useChartColors } from '../theme.jsx'
 
 const pct = (v) => (v == null ? '—' : `${v}%`)
-const axis = { fontSize: 12, fill: '#64748b' }
 
 function ChartCard({ title, empty, children, height = 260 }) {
   return (
@@ -19,6 +19,9 @@ function ChartCard({ title, empty, children, height = 260 }) {
 
 export default function Reports() {
   const state = useLoad(() => api.stats())
+  const c = useChartColors()
+  const axis = { fontSize: 12, fill: c.axis }
+  const tipProps = { contentStyle: c.tip, labelStyle: c.tipLabel, itemStyle: c.tipItem }
 
   return (
     <>
@@ -46,24 +49,24 @@ export default function Reports() {
                     <Pie isAnimationActive={false} data={status} dataKey="value" nameKey="name" innerRadius={55} outerRadius={90} paddingAngle={2}>
                       {status.map((d) => <Cell key={d.name} fill={d.color} />)}
                     </Pie>
-                    <Tooltip /><Legend formatter={(v) => <span className="text-xs text-slate-600">{v}</span>} />
+                    <Tooltip {...tipProps} /><Legend formatter={(v) => <span className="text-xs text-slate-600">{v}</span>} />
                   </PieChart>
                 </ChartCard>
 
                 <ChartCard title="Referrals by month" empty={month.length === 0}>
                   <BarChart data={month}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={c.grid} />
                     <XAxis dataKey="name" tick={axis} /><YAxis allowDecimals={false} tick={axis} />
-                    <Tooltip cursor={{ fill: '#f1f5f9' }} />
-                    <Bar isAnimationActive={false} dataKey="count" name="Referrals" fill="#2563b0" radius={[6, 6, 0, 0]} />
+                    <Tooltip {...tipProps} cursor={{ fill: c.cursorFill }} />
+                    <Bar isAnimationActive={false} dataKey="count" name="Referrals" fill={c.primary} radius={[6, 6, 0, 0]} />
                   </BarChart>
                 </ChartCard>
 
                 <ChartCard title="Referrals by urgency" empty={s.total === 0}>
                   <BarChart data={urgency}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={c.grid} />
                     <XAxis dataKey="name" tick={axis} /><YAxis allowDecimals={false} tick={axis} />
-                    <Tooltip cursor={{ fill: '#f1f5f9' }} />
+                    <Tooltip {...tipProps} cursor={{ fill: c.cursorFill }} />
                     <Bar isAnimationActive={false} dataKey="count" name="Referrals" radius={[6, 6, 0, 0]}>
                       {urgency.map((d) => <Cell key={d.name} fill={d.color} />)}
                     </Bar>
@@ -72,11 +75,11 @@ export default function Reports() {
 
                 <ChartCard title="Referrals by receiving facility" empty={facility.length === 0} height={Math.max(260, facility.length * 44)}>
                   <BarChart data={facility} layout="vertical" margin={{ left: 16 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e2e8f0" />
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={c.grid} />
                     <XAxis type="number" allowDecimals={false} tick={axis} />
                     <YAxis type="category" dataKey="name" width={130} tick={axis} />
-                    <Tooltip cursor={{ fill: '#f1f5f9' }} />
-                    <Bar isAnimationActive={false} dataKey="count" name="Referrals" fill="#0d9488" radius={[0, 6, 6, 0]} />
+                    <Tooltip {...tipProps} cursor={{ fill: c.cursorFill }} />
+                    <Bar isAnimationActive={false} dataKey="count" name="Referrals" fill={c.teal} radius={[0, 6, 6, 0]} />
                   </BarChart>
                 </ChartCard>
               </div>
@@ -85,7 +88,7 @@ export default function Reports() {
                 <table className="min-w-full text-sm">
                   <tbody className="divide-y divide-slate-100">
                     {Object.keys(STATUS).map((k) => (
-                      <tr key={k}><td className="px-5 py-2.5 text-slate-600">{STATUS[k].label}</td><td className="px-5 py-2.5 text-right font-medium text-navy-900">{s.by_status[k] || 0}</td></tr>
+                      <tr key={k}><td className="px-5 py-2.5 text-slate-600">{STATUS[k].label}</td><td className="px-5 py-2.5 text-right font-medium text-ink">{s.by_status[k] || 0}</td></tr>
                     ))}
                   </tbody>
                 </table>

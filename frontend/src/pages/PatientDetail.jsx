@@ -27,7 +27,7 @@ export default function PatientDetail() {
           <div className="space-y-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h1 className="text-2xl font-semibold text-navy-900">{p.full_name}</h1>
+                <h1 className="text-2xl font-semibold text-ink">{p.full_name}</h1>
                 <p className="mt-1 font-mono text-sm text-slate-500">{p.patient_no}</p>
               </div>
               {can('write_referral') && (

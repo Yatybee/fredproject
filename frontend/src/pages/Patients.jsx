@@ -90,7 +90,7 @@ export default function Patients() {
                   {list.data.map((p) => (
                     <tr key={p.id} onClick={() => navigate(`/patients/${p.id}`)} className="cursor-pointer hover:bg-slate-50">
                       <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-500">{p.patient_no}</td>
-                      <td className="px-4 py-3 font-medium text-navy-900">{p.full_name}</td>
+                      <td className="px-4 py-3 font-medium text-ink">{p.full_name}</td>
                       <td className="hidden px-4 py-3 text-slate-600 sm:table-cell">{fmtDate(p.date_of_birth)}</td>
                       <td className="px-4 py-3 text-slate-600">{p.phone}</td>
                       <td className="px-4 py-3 text-right text-slate-700">{p.referral_count}</td>

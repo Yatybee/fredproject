@@ -72,7 +72,7 @@ export default function Staff() {
                 <tbody className="divide-y divide-slate-100">
                   {list.map((u) => (
                     <tr key={u.id}>
-                      <td className="px-5 py-3 font-medium text-navy-900">{u.username}{u.id === user.id && <span className="ml-2 text-xs text-slate-500">(you)</span>}</td>
+                      <td className="px-5 py-3 font-medium text-ink">{u.username}{u.id === user.id && <span className="ml-2 text-xs text-slate-500">(you)</span>}</td>
                       <td className="px-5 py-3 text-slate-600">{ROLES[u.role]}</td>
                       <td className="px-5 py-3">{u.active ? <Badge className="bg-emerald-50 text-emerald-800 ring-emerald-600/20">Active</Badge> : <Badge className="bg-slate-100 text-slate-600 ring-slate-500/20">Deactivated</Badge>}</td>
                       <td className="px-5 py-3 text-right">{u.id !== user.id && <Button size="sm" variant="secondary" onClick={() => toggle(u)}>{u.active ? 'Deactivate' : 'Reactivate'}</Button>}</td>

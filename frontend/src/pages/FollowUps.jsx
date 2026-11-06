@@ -55,7 +55,7 @@ export default function FollowUps() {
       <div role="tablist" className="mb-4 inline-flex gap-1 rounded-xl bg-slate-200/60 p-1">
         {TABS.map(([k, label]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-            className={`rounded-lg px-4 py-1.5 text-sm font-medium ${tab === k ? 'bg-white text-navy-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>{label}</button>
+            className={`rounded-lg px-4 py-1.5 text-sm font-medium ${tab === k ? 'bg-surface text-ink shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>{label}</button>
         ))}
       </div>
 
@@ -75,7 +75,7 @@ export default function FollowUps() {
                   return (
                     <li key={f.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
                       <div className="min-w-0">
-                        <Link to={`/referrals/${f.referral_id}`} className="font-medium text-navy-900 hover:text-blue-600">{f.full_name}</Link>
+                        <Link to={`/referrals/${f.referral_id}`} className="font-medium text-ink hover:text-blue-600">{f.full_name}</Link>
                         <p className="text-sm text-slate-500">{f.facility_name} · Referral #{f.referral_id}</p>
                         {f.notes && <p className="mt-1 text-sm text-slate-600">{f.notes}</p>}
                       </div>
