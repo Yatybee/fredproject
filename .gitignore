@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.db
+*.db-wal
+*.db-shm
+*.log
+node_modules/
+frontend/dist/
+tests/e2e/screenshots/
+.vscode/
+.claude/
