@@ -2,7 +2,7 @@ import unittest
 from datetime import date, timedelta
 
 from referral_tracker import security
-from referral_tracker.db import connect
+from tests.pgutil import drop_schema, new_schema, open_db
 from referral_tracker.errors import (AuthError, InvalidTransition, PermissionDenied,
                                      ValidationError)
 from referral_tracker.service import Service
@@ -14,7 +14,10 @@ iso = lambda d: d.isoformat()
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.svc = Service(connect(":memory:"))
+        self.schema = new_schema()
+        self.addCleanup(drop_schema, self.schema)
+        self.svc = Service(open_db(self.schema, init=True))
+        self.addCleanup(self.svc.conn.close)
         self.svc.create_user(None, "admin", "adminpass1", "ADMIN")
         self.admin = self.svc.authenticate("admin", "adminpass1")
         self.svc.create_user(self.admin, "nurse", "nursepass1", "HEALTH_WORKER")

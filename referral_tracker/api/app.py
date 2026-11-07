@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 
 from .. import security
-from ..db import connect
+from ..db import connect, default_url, make_pool, pooled
 from ..errors import (AuthError, InvalidTransition, NotFound, PermissionDenied, ReferralError,
                       ValidationError)
 from ..service import DEFAULT_CENTRE, TRANSITIONS, Service
@@ -31,10 +31,12 @@ def rows(rs):
     return [dict(r) for r in rs]
 
 
-def create_app(db_path=None):
-    db_path = db_path or os.environ.get("REFERRAL_DB", "referrals.db")
+def create_app(db_url=None, schema=None):
+    """db_url defaults to $DATABASE_URL (Neon). schema isolates a run in its own Postgres schema (tests)."""
+    db_url = db_url or default_url()
     cookie_secure = os.environ.get("REFERRAL_COOKIE_SECURE", "0") == "1"
-    connect(db_path).close()  # create / upgrade the schema once at start-up
+    connect(db_url, schema=schema).close()  # create / upgrade the schema once at start-up
+    pool = make_pool(db_url, schema)
     failures = {}  # username -> [timestamps]; in-memory brute-force throttle
 
     # Automatic alerts: run once at start-up, then every REFERRAL_NOTIFY_INTERVAL seconds
@@ -42,15 +44,13 @@ def create_app(db_path=None):
     interval = int(os.environ.get("REFERRAL_NOTIFY_INTERVAL", "3600"))
 
     def run_notifications():
-        conn = connect(db_path, init=False)
         try:
-            n = Service(conn).generate_notifications({"role": "ADMIN"})
+            with pooled(pool) as conn:
+                n = Service(conn).generate_notifications({"role": "ADMIN"})
             if n:
                 log.info("scheduled check created %d alert(s)", n)
         except Exception:
             log.exception("scheduled notification check failed")
-        finally:
-            conn.close()
 
     async def scheduler():
         while True:
@@ -63,17 +63,15 @@ def create_app(db_path=None):
         yield
         if task:
             task.cancel()
+        pool.close()
 
     app = FastAPI(title="Referral Tracking and Follow-Up API", docs_url="/api/docs",
                   openapi_url="/api/openapi.json", lifespan=lifespan)
 
     # ---------- dependencies ----------
     def svc():
-        conn = connect(db_path, init=False)
-        try:
+        with pooled(pool) as conn:
             yield Service(conn)
-        finally:
-            conn.close()
 
     def current_user(request: Request, service: Service = Depends(svc)):
         return service.user_for_token(request.cookies.get(COOKIE))
@@ -306,4 +304,5 @@ def create_app(db_path=None):
                 return FileResponse(target)
             return FileResponse(FRONTEND_DIST / "index.html")  # client-side routing
 
+    app.state.pool = pool
     return app

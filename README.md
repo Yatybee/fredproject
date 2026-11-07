@@ -3,7 +3,7 @@
 A system for a community health center to track patients it refers to hospitals
 and specialist facilities. It is not a full hospital management system.
 
-- **Backend:** Python 3.12, FastAPI, SQLite. The business logic is a plain Python service
+- **Backend:** Python 3.12, FastAPI, PostgreSQL (hosted on Neon). The business logic is a plain Python service
   layer (`referral_tracker/service.py`) that has no web dependency.
 - **Frontend:** React (Vite) + Tailwind CSS, in `frontend/`.
 - **Also included:** the original command-line interface, which uses the same service layer
@@ -14,7 +14,7 @@ frontend/ (React, Tailwind)  --HTTP/JSON, HttpOnly cookie-->  referral_tracker/a
                                                                       |
                                               referral_tracker/service.py  (rules, permissions, validation)
                                                                       |
-                                                              db.py -> SQLite file
+                                                              db.py -> Neon PostgreSQL
 ```
 
 ## Running the web application
@@ -25,6 +25,17 @@ Requirements: Python 3.12+, Node.js 20+.
 pip install -r requirements.txt
 cd frontend && npm install && cd ..
 ```
+
+**0. Point the app at your Neon database.** In the Neon dashboard choose *Connect* and copy
+the connection string, then set it (see [.env.example](.env.example)):
+
+```
+set DATABASE_URL=postgresql://USER:PASSWORD@ep-xxxx.REGION.aws.neon.tech/neondb?sslmode=require
+```
+
+The tables are created automatically the first time the app starts. To bring over data from
+an old `referrals.db` file, run once: `python -m referral_tracker.migrate_sqlite referrals.db`
+(into an empty Neon database).
 
 **1. Create the first administrator** (once; there is no public sign-up, by design):
 
@@ -55,7 +66,7 @@ is missing (the half-completed form is kept).
 Upgrading an existing database is automatic: the new columns (patient address, referring
 facility, notes) are added the first time the server starts.
 
-Settings (environment variables): `REFERRAL_DB` (SQLite file, default `referrals.db`),
+Settings (environment variables): `DATABASE_URL` (Neon connection string, required),
 `REFERRAL_LOG` (default `referral_tracker.log`), `REFERRAL_NOTIFY_INTERVAL` (default 3600), `REFERRAL_COOKIE_SECURE=1` (set this when
 serving over HTTPS). Interactive API documentation is at http://localhost:8000/api/docs.
 
@@ -140,7 +151,7 @@ Browser end-to-end test (drives the real UI in Chrome against a running server; 
 **fresh** database containing only the admin `admin` / `adminpass1`):
 
 ```
-set REFERRAL_DB=%CD%\e2e.db && set REFERRAL_PASSWORD=adminpass1
+set DATABASE_URL=<a scratch Neon branch> && set REFERRAL_PASSWORD=adminpass1
 python -m referral_tracker init-admin admin
 python -m uvicorn referral_tracker.api.main:app --port 8000          # keep running
 cd tests\e2e && npm install && node run.mjs                         # 59 checks
@@ -150,7 +161,7 @@ cd tests\e2e && npm install && node run.mjs                         # 59 checks
 
 The original CLI still works and shares the same database. Its documentation follows.
 
-Written in **Python 3.12** with **SQLite**, using only the standard library.
+Written in **Python 3.12** with **PostgreSQL** (Neon) through `psycopg`.
 
 ## Requirements covered
 
@@ -180,8 +191,9 @@ python -m referral_tracker -u nurse1 inbox
 python -m referral_tracker -u nurse1 stats
 ```
 
-Passwords are prompted for (hidden). `REFERRAL_USER`, `REFERRAL_PASSWORD` and `REFERRAL_DB`
-can be set for scripted runs. Run the tests with `python -m unittest discover -s tests -t .`
+Passwords are prompted for (hidden). `REFERRAL_USER`, `REFERRAL_PASSWORD` and `DATABASE_URL`
+can be set for scripted runs. Run the tests with `python -m unittest discover -s tests -t .` after setting
+`TEST_DATABASE_URL` to a scratch database or Neon branch (each test works in its own schema).
 
 **How notification works.** `notify` is meant to run once a day. A referral is *outstanding*
 when it is still PENDING or NO_SHOW after its expected-by date (default 1/3/14 days for
@@ -220,20 +232,20 @@ would be added by reading the `notifications` table.
 - The audit log records who did what, using record ids rather than patient names.
 - Python's standard library has no secure-by-default web layer, so this is a local CLI. If
   it were turned into a web app, HTTPS, session handling and CSRF protection would have to
-  be added (for example with Flask or Django), and the SQLite file would need
-  disk encryption and backups.
+  be added (for example with Flask or Django), and the database would need
+  encryption at rest and backups (Neon provides both).
 
 ### 3. Database interaction
-- The built-in `sqlite3` module needs no server or installation, which suits a small
-  health center. The schema is normalized into users, facilities, patients, referrals,
+- The app uses Neon, a hosted PostgreSQL service, through the `psycopg` driver, so several
+  health workers can write at once and the data is backed up by the provider. The schema is normalized into users, facilities, patients, referrals,
   follow-ups, notifications and the audit log, with an index on referral status.
 - The `transaction()` context manager in [db.py](referral_tracker/db.py) commits on success
   and rolls back on any exception, so a failure never leaves a referral saved without its
   audit entry.
-- `sqlite3.Row` gives column access by name. Joins and `GROUP BY` queries produce the
+- A small `Row` type in [db.py](referral_tracker/db.py) gives column access by name. Joins and `GROUP BY` queries produce the
   statistics directly in SQL, which is faster than aggregating rows in Python.
-- Limits: SQLite allows one writer at a time. For several clinics writing at once, the same
-  SQL moves to PostgreSQL with minimal changes (via `psycopg` or SQLAlchemy).
+- Neon scales to zero when idle, so the first request after a quiet period can take a second
+  longer while the database wakes up.
 
 ### 4. Error handling
 - Expected problems have their own exception classes (`ValidationError`, `AuthError`,
@@ -243,7 +255,7 @@ would be added by reading the `notifications` table.
   clear message and exits with code 1. Any other exception is a bug: the full traceback goes
   to `referral_tracker.log`, the user sees only a generic message (exit code 2), and no
   internals are leaked.
-- Low-level errors are translated. `sqlite3.IntegrityError` on a duplicate username becomes
+- Low-level errors are translated. `psycopg.IntegrityError` on a duplicate username becomes
   "Username already taken."
 
 ### 5. Maintainability

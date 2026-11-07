@@ -14,7 +14,7 @@ log = logging.getLogger("referral_tracker")
 
 def build_parser():
     p = argparse.ArgumentParser(prog="referral_tracker", description=__doc__)
-    p.add_argument("--db", default=os.environ.get("REFERRAL_DB", "referrals.db"))
+    p.add_argument("--db", default=None, help="Postgres connection string (default: $DATABASE_URL)")
     p.add_argument("--user", "-u", help="username (or set REFERRAL_USER)")
     sub = p.add_subparsers(dest="cmd", required=True)
 

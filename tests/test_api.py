@@ -1,5 +1,4 @@
 import os
-import tempfile
 import unittest
 from datetime import date, timedelta
 
@@ -7,8 +6,8 @@ from fastapi.testclient import TestClient
 
 from referral_tracker import security
 from referral_tracker.api import create_app
-from referral_tracker.db import connect
 from referral_tracker.service import Service
+from tests.pgutil import drop_schema, new_schema, open_db, test_url
 
 security._ITERATIONS = 1000  # fast hashing for tests only
 iso = lambda d: d.isoformat()
@@ -16,23 +15,20 @@ iso = lambda d: d.isoformat()
 
 class ApiBase(unittest.TestCase):
     def setUp(self):
-        fd, self.path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
-        conn = connect(self.path)
+        self.schema = new_schema()
+        self.db = lambda: open_db(self.schema)
+        conn = open_db(self.schema, init=True)
         svc = Service(conn)
         svc.create_user(None, "admin", "adminpass1", "ADMIN")
         admin = svc.authenticate("admin", "adminpass1")
         svc.create_user(admin, "nurse", "nursepass1", "HEALTH_WORKER")
         svc.create_user(admin, "viewer", "viewpass12", "VIEWER")
         conn.close()
-        self.app = create_app(self.path)
+        self.app = create_app(test_url(), schema=self.schema)
 
     def tearDown(self):
-        for ext in ("", "-wal", "-shm"):
-            try:
-                os.remove(self.path + ext)
-            except OSError:
-                pass
+        self.app.state.pool.close()
+        drop_schema(self.schema)
 
     def client(self, user=None, password=None):
         c = TestClient(self.app)
@@ -124,7 +120,7 @@ class TestPermissions(ApiBase):
 
 
 class TestReferralFlow(ApiBase):
-    def test_full_lifecycle_persisted_in_sqlite(self):
+    def test_full_lifecycle_persisted_in_postgres(self):
         n = self.nurse()
         rid = self.make_referral(n)
         d = n.get(f"/api/referrals/{rid}").json()
@@ -141,8 +137,8 @@ class TestReferralFlow(ApiBase):
         self.assertEqual(d["status"], "COMPLETED")
         self.assertEqual([h["to_status"] for h in d["history"]], ["PENDING", "ATTENDED", "COMPLETED"])
         self.assertEqual(d["followups"][0]["notes"], "Review cast")
-        # data really is in the database file, not memory
-        row = connect(self.path).execute("SELECT status, outcome FROM referrals WHERE id=?", (rid,)).fetchone()
+        # data really is in the database, not memory
+        row = self.db().execute("SELECT status, outcome FROM referrals WHERE id=?", (rid,)).fetchone()
         self.assertEqual((row["status"], row["outcome"]), ("COMPLETED", "Treated"))
 
     def test_invalid_transition_409(self):
@@ -219,7 +215,7 @@ class TestNotificationsStats(ApiBase):
         n = self.nurse()
         rid = self.make_referral(n, expected_by=iso(date.today() + timedelta(1)))
         # make it overdue directly in the DB (the API refuses past dates by design)
-        conn = connect(self.path)
+        conn = self.db()
         conn.execute("UPDATE referrals SET expected_by=? WHERE id=?", (iso(date.today() - timedelta(3)), rid))
         conn.commit()
         conn.close()
@@ -262,10 +258,9 @@ if __name__ == "__main__":
 
 class AutoNotifyTests(unittest.TestCase):
     def test_overdue_alert_created_at_startup_without_any_request(self):
-        fd, path = tempfile.mkstemp(suffix=".db")
-        os.close(fd)
+        schema = new_schema()
         try:
-            conn = connect(path)
+            conn = open_db(schema, init=True)
             svc = Service(conn)
             svc.create_user(None, "admin", "adminpass1", "ADMIN")
             admin = svc.authenticate("admin", "adminpass1")
@@ -279,18 +274,14 @@ class AutoNotifyTests(unittest.TestCase):
             before = len(svc.my_notifications(admin))
             conn.close()
             os.environ["REFERRAL_NOTIFY_INTERVAL"] = "3600"
-            with TestClient(create_app(path)):  # entering the context runs start-up
+            with TestClient(create_app(test_url(), schema=schema)):  # entering the context runs start-up
                 import time
                 time.sleep(1.0)
-            conn = connect(path)
+            conn = open_db(schema)
             after = len(Service(conn).my_notifications(admin))
             conn.close()
             self.assertEqual(before, 0)
             self.assertGreaterEqual(after, 1)
         finally:
             os.environ.pop("REFERRAL_NOTIFY_INTERVAL", None)
-            for ext in ("", "-wal", "-shm"):
-                try:
-                    os.remove(path + ext)
-                except OSError:
-                    pass
+            drop_schema(schema)

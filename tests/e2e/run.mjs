@@ -1,6 +1,6 @@
 // Browser end-to-end test: drives the real React UI against a running server on a FRESH database
 // that contains only the admin account (admin / adminpass1). See "Testing" in the README.
-//   REFERRAL_DB=<path to that db> [BASE=http://localhost:8000] [CHROME_PATH=...] node run.mjs
+//   DATABASE_URL=<connection string of that db> [BASE=http://localhost:8000] [CHROME_PATH=...] node run.mjs
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -300,7 +300,7 @@ try {
 
   // notifications w/ overdue data (DB tweaked by driver script between phases)
   {
-    execFileSync('python', ['-c', "import sqlite3,sys,datetime as d;c=sqlite3.connect(sys.argv[1]);c.execute('update referrals set expected_by=? where id=2',((d.date.today()-d.timedelta(5)).isoformat(),));c.commit()", process.env.REFERRAL_DB])
+    execFileSync('python', ['-c', "import sys,datetime as d,psycopg;c=psycopg.connect(sys.argv[1]);c.execute('update referrals set expected_by=%s where id=2',((d.date.today()-d.timedelta(5)).isoformat(),));c.commit()", process.env.DATABASE_URL])
     await goto(page, '/notifications')
     await clickText(page, 'Check for new alerts'); await settle()
     t = await text(page)

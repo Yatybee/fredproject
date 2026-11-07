@@ -1,12 +1,11 @@
 """Business logic. All SQL uses bound parameters (no string-built queries)."""
-import sqlite3
 import hashlib
 import os
 import secrets
 from datetime import date, datetime, timedelta
 
 from . import security, validation as v
-from .db import transaction
+from .db import IntegrityError, transaction
 from .errors import AuthError, InvalidTransition, NotFound, ValidationError
 
 # Referral workflow: current status -> statuses it may move to.
@@ -39,6 +38,10 @@ class Service:
             "INSERT INTO referral_history (referral_id, from_status, to_status, changed_by, note)"
             " VALUES (?,?,?,?,?)", (referral_id, from_status, to_status, user_id, note))
 
+    def _insert(self, sql, params):
+        """Run an INSERT and return the new row's id."""
+        return self.conn.execute(sql + " RETURNING id", params).fetchone()[0]
+
     def _one(self, sql, params, what):
         row = self.conn.execute(sql, params).fetchone()
         if row is None:
@@ -61,14 +64,14 @@ class Service:
         salt, digest = security.hash_password(password)
         try:
             with transaction(self.conn):
-                cur = self.conn.execute(
+                new_id = self._insert(
                     "INSERT INTO users (username, salt, password_hash, role) VALUES (?,?,?,?)",
                     (username, salt, digest, role),
                 )
                 self._audit(actor, "create_user", f"{username} as {role}")
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             raise ValidationError(f"Username '{username}' is already taken.")
-        return cur.lastrowid
+        return new_id
 
     def authenticate(self, username, password):
         row = self.conn.execute(
@@ -137,14 +140,14 @@ class Service:
         phone = v.phone(phone) if phone else ""
         try:
             with transaction(self.conn):
-                cur = self.conn.execute(
+                new_id = self._insert(
                     "INSERT INTO facilities (name, location, phone) VALUES (?,?,?)",
                     (name, location, phone),
                 )
                 self._audit(actor, "add_facility", name)
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             raise ValidationError(f"Facility '{name}' already exists.")
-        return cur.lastrowid
+        return new_id
 
     def list_facilities(self, actor):
         security.require(actor, "read")
@@ -163,7 +166,7 @@ class Service:
                 self.conn.execute("UPDATE facilities SET name=?, location=?, phone=? WHERE id=?",
                                   (name, location, phone, facility_id))
                 self._audit(actor, "update_facility", f"id={facility_id}")
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             raise ValidationError(f"Facility '{name}' already exists.")
 
     def delete_facility(self, actor, facility_id):
@@ -187,7 +190,7 @@ class Service:
                       (SELECT COUNT(*) FROM referrals r WHERE r.patient_id = p.id) AS referral_count,
                       (SELECT MAX(referral_date) FROM referrals r WHERE r.patient_id = p.id) AS last_referral
                FROM patients p
-               WHERE p.full_name LIKE ? OR p.phone LIKE ? OR {_PATIENT_NO} LIKE ?
+               WHERE p.full_name ILIKE ? OR p.phone ILIKE ? OR {_PATIENT_NO} ILIKE ?
                ORDER BY p.full_name LIMIT ?""",
             (like, like, like, int(limit))).fetchall()
 
@@ -208,12 +211,12 @@ class Service:
         return name, dob, v.phone(phone), v.optional_text(address, "Address", 200)
 
     def _insert_patient(self, actor, name, dob, phone, address=""):
-        cur = self.conn.execute(
+        new_id = self._insert(
             "INSERT INTO patients (full_name, date_of_birth, phone, address) VALUES (?,?,?,?)",
             (name, dob, phone, address),
         )
-        self._audit(actor, "add_patient", f"id={cur.lastrowid}")  # no PII in the log
-        return cur.lastrowid
+        self._audit(actor, "add_patient", f"id={new_id}")  # no PII in the log
+        return new_id
 
     def add_patient(self, actor, full_name, date_of_birth, phone, address=""):
         security.require(actor, "write_referral")
@@ -254,7 +257,7 @@ class Service:
 
     def _insert_referral(self, actor, patient_id, facility_id, reason, urgency, expected_by,
                          referral_date, referring, notes, responsible_id):
-        cur = self.conn.execute(
+        new_id = self._insert(
             """INSERT INTO referrals
                (patient_id, facility_id, referred_by, reason, urgency, referral_date, expected_by,
                 referring_facility, notes)
@@ -262,9 +265,9 @@ class Service:
             (patient_id, facility_id, responsible_id, reason, urgency, referral_date, expected_by,
              referring, notes),
         )  # status defaults to PENDING
-        self._history(cur.lastrowid, None, "PENDING", actor["id"], "Referral created")
-        self._audit(actor, "create_referral", f"id={cur.lastrowid}")
-        return cur.lastrowid
+        self._history(new_id, None, "PENDING", actor["id"], "Referral created")
+        self._audit(actor, "create_referral", f"id={new_id}")
+        return new_id
 
     def create_referral(self, actor, patient_id, facility_id, reason, urgency="ROUTINE",
                         expected_by=None, *, referral_date=None, referring_facility="", notes="",
@@ -306,7 +309,7 @@ class Service:
             where.append("r.facility_id = ?")
             params.append(v.positive_int(facility_id, "Facility id"))
         if q and q.strip():
-            where.append("(p.full_name LIKE ? OR p.phone LIKE ? OR r.reason LIKE ? OR CAST(r.id AS TEXT) = ?)")
+            where.append("(p.full_name ILIKE ? OR p.phone ILIKE ? OR r.reason ILIKE ? OR CAST(r.id AS TEXT) = ?)")
             like = f"%{q.strip()}%"
             params += [like, like, like, q.strip().lstrip("#")]
         sql = _REFERRAL_SELECT + (" WHERE " + " AND ".join(where) if where else "")
@@ -365,12 +368,12 @@ class Service:
         if ref["status"] == "CANCELLED":
             raise InvalidTransition("Cannot schedule follow-up for a cancelled referral.")
         with transaction(self.conn):
-            cur = self.conn.execute(
+            new_id = self._insert(
                 "INSERT INTO followups (referral_id, scheduled_for, notes, created_by) VALUES (?,?,?,?)",
                 (referral_id, scheduled_for, notes, actor["id"]),
             )
             self._audit(actor, "schedule_followup", f"referral={referral_id}")
-        return cur.lastrowid
+        return new_id
 
     def complete_followup(self, actor, followup_id):
         security.require(actor, "write_referral")
@@ -452,8 +455,9 @@ class Service:
             for owner, ref_id, kind, msg in alerts:
                 for uid in recipients(owner):
                     cur = self.conn.execute(
-                        "INSERT OR IGNORE INTO notifications "
-                        "(user_id, referral_id, kind, message, created_on) VALUES (?,?,?,?,?)",
+                        "INSERT INTO notifications "
+                        "(user_id, referral_id, kind, message, created_on) VALUES (?,?,?,?,?) "
+                        "ON CONFLICT DO NOTHING",
                         (uid, ref_id, kind, msg, today))
                     created += cur.rowcount
         return created
@@ -490,7 +494,7 @@ class Service:
         by_urgency = {r[0]: r[1] for r in c.execute(
             "SELECT urgency, COUNT(*) FROM referrals GROUP BY urgency")}
         avg_days = c.execute(
-            "SELECT AVG(julianday(attended_on) - julianday(referral_date)) FROM referrals "
+            "SELECT AVG(attended_on::date - referral_date::date) FROM referrals "
             "WHERE attended_on IS NOT NULL").fetchone()[0]
         closed = by_status.get("ATTENDED", 0) + by_status.get("COMPLETED", 0)
         decided = total - by_status.get("PENDING", 0) - by_status.get("CANCELLED", 0)
@@ -505,7 +509,7 @@ class Service:
             "by_facility": by_facility,
             "attendance_rate": round(100 * closed / decided, 1) if decided else None,
             "completion_rate": round(100 * by_status.get("COMPLETED", 0) / total, 1) if total else None,
-            "avg_days_to_attendance": round(avg_days, 1) if avg_days is not None else None,
+            "avg_days_to_attendance": round(float(avg_days), 1) if avg_days is not None else None,
             "overdue": len(self.outstanding_referrals(actor, today)),
             "followups_pending": c.execute("SELECT COUNT(*) FROM followups WHERE done=0").fetchone()[0],
             "followups_overdue": c.execute(
@@ -520,12 +524,12 @@ def _h(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-_PATIENT_NO = "('PT-' || printf('%05d', p.id))"
+_PATIENT_NO = "('PT-' || lpad(p.id::text, 5, '0'))"
 _PATIENT_COLS = f"p.*, {_PATIENT_NO} AS patient_no"
 
 _REFERRAL_SELECT = """
 SELECT r.*, p.full_name AS patient_name, p.phone AS patient_phone, p.address AS patient_address,
-       p.date_of_birth AS patient_dob, 'PT-' || printf('%05d', p.id) AS patient_no,
+       p.date_of_birth AS patient_dob, 'PT-' || lpad(p.id::text, 5, '0') AS patient_no,
        f.name AS facility_name, u.username AS referred_by_name
 FROM referrals r
 JOIN patients p ON p.id = r.patient_id
