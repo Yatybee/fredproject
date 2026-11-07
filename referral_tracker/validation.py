@@ -1,4 +1,4 @@
-"""Input validation. Every value from the user passes through here first."""
+"""Input validation.. Every value from the user passes through here first."""
 import re
 from datetime import date, datetime
 
