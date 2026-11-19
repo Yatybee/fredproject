@@ -1,9 +1,9 @@
 // Thin fetch wrapper. The session lives in an HttpOnly cookie set by the server,
 // so no token is ever readable by (or stored in) JavaScript.
 //
-// VITE_API_BASE_URL is the backend origin when the frontend is hosted separately
-// (e.g. on Vercel). Leave it unset when the API serves the built app itself.
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '')
+// All requests go to same-origin `/api/...`. In production Vercel rewrites them to the
+// backend (see vercel.json); in development Vite proxies them (see vite.config.js).
+// The browser therefore never makes a cross-site request, so no CORS or third-party cookies.
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -22,9 +22,9 @@ async function request(method, path, body) {
   const hasBody = body !== undefined
   let res
   try {
-    res = await fetch(`${API_BASE}/api${path}`, {
+    res = await fetch(`/api${path}`, {
       method,
-      credentials: 'include', // send the session cookie, including cross-origin
+      credentials: 'same-origin', // send the session cookie to our own origin
       headers: hasBody ? { 'Content-Type': 'application/json' } : undefined,
       body: hasBody ? JSON.stringify(body) : undefined,
     })
