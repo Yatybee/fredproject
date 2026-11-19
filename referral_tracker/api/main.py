@@ -1,6 +1,8 @@
 """ASGI entry point:  uvicorn referral_tracker.api.main:app"""
 import logging
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 from .app import create_app
 

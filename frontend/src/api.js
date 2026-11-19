@@ -1,5 +1,6 @@
 // Thin fetch wrapper. The session lives in an HttpOnly cookie set by the server,
 // so no token is ever readable by (or stored in) JavaScript.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 export class ApiError extends Error {
   constructor(message, status) {
     super(message)
@@ -13,9 +14,11 @@ export const setUnauthorizedHandler = (fn) => { onUnauthorized = fn }
 async function request(method, path, body) {
   let res
   try {
-    res = await fetch(`/api${path}`, {
-      method,
-      credentials: 'same-origin',
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
+  res = await fetch(`${API_BASE}/api${path}`, {
+  method,
+  credentials: 'include',
       headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })

@@ -8,6 +8,7 @@ from referral_tracker.errors import (AuthError, InvalidTransition, PermissionDen
 from referral_tracker.service import Service
 
 security._ITERATIONS = 1000  # fast hashing for tests only
+
 TODAY = date.today()
 iso = lambda d: d.isoformat()
 

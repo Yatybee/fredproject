@@ -1,6 +1,8 @@
 """FastAPI application. A thin HTTP adapter over referral_tracker.service.Service:
 no business rules live here, so validation, permissions and workflow are identical to the CLI."""
+
 import asyncio
+import contextlib
 import logging
 import os
 import time
@@ -9,12 +11,19 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from .. import security
 from ..db import connect, default_url, make_pool, pooled
-from ..errors import (AuthError, InvalidTransition, NotFound, PermissionDenied, ReferralError,
-                      ValidationError)
+from ..errors import (
+    AuthError,
+    InvalidTransition,
+    NotFound,
+    PermissionDenied,
+    ReferralError,
+    ValidationError,
+)
 from ..service import DEFAULT_CENTRE, TRANSITIONS, Service
 from . import schemas as s
 
@@ -22,8 +31,13 @@ log = logging.getLogger("referral_tracker.api")
 
 COOKIE = "session"
 MAX_FAILS, LOCKOUT_SECONDS = 5, 300
-STATUS_FOR = {ValidationError: 422, AuthError: 401, PermissionDenied: 403,
-              NotFound: 404, InvalidTransition: 409}
+STATUS_FOR = {
+    ValidationError: 422,
+    AuthError: 401,
+    PermissionDenied: 403,
+    NotFound: 404,
+    InvalidTransition: 409,
+}
 FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
@@ -32,15 +46,26 @@ def rows(rs):
 
 
 def create_app(db_url=None, schema=None):
-    """db_url defaults to $DATABASE_URL (Neon). schema isolates a run in its own Postgres schema (tests)."""
+    """db_url defaults to $DATABASE_URL (Neon).
+    schema isolates a run in its own Postgres schema (tests)."""
     db_url = db_url or default_url()
+
+    # Cookie settings. If the React app is on a different site from this API (e.g. Vercel),
+    # the browser only sends the cookie when SameSite=None and Secure are both set:
+    #   REFERRAL_COOKIE_SAMESITE=none  REFERRAL_COOKIE_SECURE=1
+    cookie_samesite = os.environ.get("REFERRAL_COOKIE_SAMESITE", "strict").lower()
     cookie_secure = os.environ.get("REFERRAL_COOKIE_SECURE", "0") == "1"
+    if cookie_samesite == "none":
+        cookie_secure = True  # browsers reject SameSite=None cookies without Secure
+
     connect(db_url, schema=schema).close()  # create / upgrade the schema once at start-up
     pool = make_pool(db_url, schema)
     failures = {}  # username -> [timestamps]; in-memory brute-force throttle
 
     # Automatic alerts: run once at start-up, then every REFERRAL_NOTIFY_INTERVAL seconds
     # (default 3600; 0 turns the scheduler off). Same rules as the Notifications button / `notify`.
+    # Note: every worker process runs its own scheduler, so use a single worker (or turn it
+    # off and run `notify` from cron) to avoid duplicate alerts.
     interval = int(os.environ.get("REFERRAL_NOTIFY_INTERVAL", "3600"))
 
     def run_notifications():
@@ -60,13 +85,34 @@ def create_app(db_url=None, schema=None):
     @asynccontextmanager
     async def lifespan(_):
         task = asyncio.create_task(scheduler()) if interval > 0 else None
-        yield
-        if task:
-            task.cancel()
-        pool.close()
+        try:
+            yield
+        finally:
+            if task:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            pool.close()
 
-    app = FastAPI(title="Referral Tracking and Follow-Up API", docs_url="/api/docs",
-                  openapi_url="/api/openapi.json", lifespan=lifespan)
+    app = FastAPI(
+        title="Referral Tracking and Follow-Up API",
+        docs_url="/api/docs",
+        openapi_url="/api/openapi.json",
+        lifespan=lifespan,
+    )
+
+    cors_origins = [
+        origin.strip()
+        for origin in os.environ.get("CORS_ORIGINS", "https://fredproject.vercel.app").split(",")
+        if origin.strip()
+    ]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # ---------- dependencies ----------
     def svc():
@@ -86,8 +132,8 @@ def create_app(db_url=None, schema=None):
     async def bad_shape(_, exc: RequestValidationError):
         first = exc.errors()[0]
         field = ".".join(str(p) for p in first["loc"] if p != "body")
-        return JSONResponse({"detail": f"{field}: {first['msg']}" if field else first["msg"]},
-                            status_code=422)
+        detail = f"{field}: {first['msg']}" if field else first["msg"]
+        return JSONResponse({"detail": detail}, status_code=422)
 
     @app.exception_handler(Exception)
     async def unexpected(request: Request, exc: Exception):
@@ -96,6 +142,16 @@ def create_app(db_url=None, schema=None):
 
     api = APIRouter(prefix="/api")
 
+    def me_payload(user):
+        return {
+            "id": user["id"],
+            "username": user["username"],
+            "role": user["role"],
+            "permissions": sorted(
+                action for action, roles in security.PERMISSIONS.items() if user["role"] in roles
+            ),
+        }
+
     # ---------- auth ----------
     @api.post("/auth/login")
     def login(body: s.LoginIn, response: Response, service: Service = Depends(svc)):
@@ -103,32 +159,39 @@ def create_app(db_url=None, schema=None):
         now = time.time()
         recent = [t for t in failures.get(key, []) if now - t < LOCKOUT_SECONDS]
         if len(recent) >= MAX_FAILS:
-            return JSONResponse({"detail": "Too many failed attempts. Try again in a few minutes."},
-                                status_code=429)
+            failures[key] = recent
+            return JSONResponse(
+                {"detail": "Too many failed attempts. Try again in a few minutes."},
+                status_code=429,
+            )
         try:
             user = service.authenticate(body.username, body.password)
         except AuthError:
             failures[key] = recent + [now]
             raise
         failures.pop(key, None)
-        response.set_cookie(COOKIE, service.create_session(user), httponly=True, samesite="strict",
-                            secure=cookie_secure, max_age=service.SESSION_HOURS * 3600)
+        response.set_cookie(
+            COOKIE,
+            service.create_session(user),
+            httponly=True,
+            samesite=cookie_samesite,
+            secure=cookie_secure,
+            max_age=service.SESSION_HOURS * 3600,
+        )
         return me_payload(user)
 
     @api.post("/auth/logout")
     def logout(request: Request, response: Response, service: Service = Depends(svc)):
         service.end_session(request.cookies.get(COOKIE))
-        response.delete_cookie(COOKIE)
+        # attributes must match set_cookie, otherwise the browser keeps the cookie
+        response.delete_cookie(
+            COOKIE, httponly=True, samesite=cookie_samesite, secure=cookie_secure
+        )
         return {"ok": True}
 
     @api.get("/auth/me")
     def me(user=Depends(current_user)):
         return me_payload(user)
-
-    def me_payload(user):
-        return {"id": user["id"], "username": user["username"], "role": user["role"],
-                "permissions": sorted(a for a, roles in security.PERMISSIONS.items()
-                                      if user["role"] in roles)}
 
     # ---------- users (admin) ----------
     @api.get("/users")
@@ -140,8 +203,12 @@ def create_app(db_url=None, schema=None):
         return {"id": service.create_user(user, body.username, body.password, body.role)}
 
     @api.patch("/users/{user_id}")
-    def set_user_active(user_id: int, body: s.UserActiveIn, user=Depends(current_user),
-                        service: Service = Depends(svc)):
+    def set_user_active(
+        user_id: int,
+        body: s.UserActiveIn,
+        user=Depends(current_user),
+        service: Service = Depends(svc),
+    ):
         service.set_user_active(user, user_id, body.active)
         return {"ok": True}
 
@@ -160,17 +227,25 @@ def create_app(db_url=None, schema=None):
         return rows(service.list_facilities(user))
 
     @api.post("/facilities", status_code=201)
-    def add_facility(body: s.FacilityIn, user=Depends(current_user), service: Service = Depends(svc)):
+    def add_facility(
+        body: s.FacilityIn, user=Depends(current_user), service: Service = Depends(svc)
+    ):
         return {"id": service.add_facility(user, body.name, body.location, body.phone)}
 
     @api.put("/facilities/{facility_id}")
-    def update_facility(facility_id: int, body: s.FacilityIn, user=Depends(current_user),
-                        service: Service = Depends(svc)):
+    def update_facility(
+        facility_id: int,
+        body: s.FacilityIn,
+        user=Depends(current_user),
+        service: Service = Depends(svc),
+    ):
         service.update_facility(user, facility_id, body.name, body.location, body.phone)
         return {"ok": True}
 
     @api.delete("/facilities/{facility_id}")
-    def delete_facility(facility_id: int, user=Depends(current_user), service: Service = Depends(svc)):
+    def delete_facility(
+        facility_id: int, user=Depends(current_user), service: Service = Depends(svc)
+    ):
         service.delete_facility(user, facility_id)
         return {"ok": True}
 
@@ -181,39 +256,72 @@ def create_app(db_url=None, schema=None):
 
     @api.post("/patients", status_code=201)
     def add_patient(body: s.PatientIn, user=Depends(current_user), service: Service = Depends(svc)):
-        pid = service.add_patient(user, body.full_name, body.date_of_birth, body.phone, body.address)
+        pid = service.add_patient(
+            user, body.full_name, body.date_of_birth, body.phone, body.address
+        )
         return {"id": pid, "patient_no": f"PT-{pid:05d}"}
 
     @api.get("/patients/{patient_id}")
     def patient(patient_id: int, user=Depends(current_user), service: Service = Depends(svc)):
-        p, referrals = service.get_patient(user, patient_id)
-        return {**dict(p), "referrals": rows(referrals)}
+        p, patient_referrals = service.get_patient(user, patient_id)
+        return {**dict(p), "referrals": rows(patient_referrals)}
 
     # ---------- referrals ----------
     @api.get("/referrals")
-    def referrals(q: str = "", status: str = "", urgency: str = "", facility_id: int = 0,
-                  user=Depends(current_user), service: Service = Depends(svc)):
-        return rows(service.list_referrals(user, status or None, q, urgency or None, facility_id or None))
+    def referrals(
+        q: str = "",
+        status: str = "",
+        urgency: str = "",
+        facility_id: int = 0,
+        user=Depends(current_user),
+        service: Service = Depends(svc),
+    ):
+        return rows(
+            service.list_referrals(user, status or None, q, urgency or None, facility_id or None)
+        )
 
+    # NOTE: must stay above /referrals/{referral_id}, or "outstanding" is parsed as an id.
     @api.get("/referrals/outstanding")
     def outstanding(user=Depends(current_user), service: Service = Depends(svc)):
         return rows(service.outstanding_referrals(user))
 
     @api.post("/referrals", status_code=201)
-    def create_referral(body: s.ReferralIn, user=Depends(current_user), service: Service = Depends(svc)):
+    def create_referral(
+        body: s.ReferralIn, user=Depends(current_user), service: Service = Depends(svc)
+    ):
         if (body.patient_id is None) == (body.patient is None):
             raise ValidationError("Provide either an existing patient or new patient details.")
-        extra = dict(referral_date=body.referral_date, referring_facility=body.referring_facility,
-                     notes=body.notes, responsible_id=body.responsible_id)
+        extra = dict(
+            referral_date=body.referral_date,
+            referring_facility=body.referring_facility,
+            notes=body.notes,
+            responsible_id=body.responsible_id,
+        )
         if body.patient:
             p = body.patient
             pid, rid = service.register_and_refer(
-                user, p.full_name, p.date_of_birth, p.phone, body.facility_id, body.reason,
-                body.urgency, body.expected_by, address=p.address, **extra)
+                user,
+                p.full_name,
+                p.date_of_birth,
+                p.phone,
+                body.facility_id,
+                body.reason,
+                body.urgency,
+                body.expected_by,
+                address=p.address,
+                **extra,
+            )
         else:
             pid = body.patient_id
-            rid = service.create_referral(user, pid, body.facility_id, body.reason, body.urgency,
-                                          body.expected_by, **extra)
+            rid = service.create_referral(
+                user,
+                pid,
+                body.facility_id,
+                body.reason,
+                body.urgency,
+                body.expected_by,
+                **extra,
+            )
         return {"id": rid, "patient_id": pid}
 
     @api.get("/referrals/{referral_id}")
@@ -225,8 +333,12 @@ def create_app(db_url=None, schema=None):
         return r
 
     @api.post("/referrals/{referral_id}/status")
-    def set_status(referral_id: int, body: s.StatusIn, user=Depends(current_user),
-                   service: Service = Depends(svc)):
+    def set_status(
+        referral_id: int,
+        body: s.StatusIn,
+        user=Depends(current_user),
+        service: Service = Depends(svc),
+    ):
         new = body.status.upper()
         if new == "ATTENDED":
             service.confirm_attendance(user, referral_id, body.attended_on)
@@ -241,24 +353,38 @@ def create_app(db_url=None, schema=None):
         return {"ok": True}
 
     @api.post("/referrals/{referral_id}/attendance")
-    def confirm_attendance(referral_id: int, body: s.StatusIn | None = None,
-                           user=Depends(current_user), service: Service = Depends(svc)):
+    def confirm_attendance(
+        referral_id: int,
+        body: s.StatusIn | None = None,
+        user=Depends(current_user),
+        service: Service = Depends(svc),
+    ):
         service.confirm_attendance(user, referral_id, body.attended_on if body else None)
         return {"ok": True}
 
     # ---------- follow-ups ----------
     @api.get("/followups")
-    def followups(state: str = "pending", due: bool = False, user=Depends(current_user),
-                  service: Service = Depends(svc)):
+    def followups(
+        state: str = "pending",
+        due: bool = False,
+        user=Depends(current_user),
+        service: Service = Depends(svc),
+    ):
         return rows(service.list_followups(user, due_only=due, state=state))
 
     @api.post("/referrals/{referral_id}/followups", status_code=201)
-    def add_followup(referral_id: int, body: s.FollowupIn, user=Depends(current_user),
-                     service: Service = Depends(svc)):
+    def add_followup(
+        referral_id: int,
+        body: s.FollowupIn,
+        user=Depends(current_user),
+        service: Service = Depends(svc),
+    ):
         return {"id": service.schedule_followup(user, referral_id, body.scheduled_for, body.notes)}
 
     @api.post("/followups/{followup_id}/complete")
-    def complete_followup(followup_id: int, user=Depends(current_user), service: Service = Depends(svc)):
+    def complete_followup(
+        followup_id: int, user=Depends(current_user), service: Service = Depends(svc)
+    ):
         service.complete_followup(user, followup_id)
         return {"ok": True}
 
@@ -268,8 +394,11 @@ def create_app(db_url=None, schema=None):
         return {"created": service.generate_notifications(user)}
 
     @api.get("/notifications")
-    def notifications(include_read: bool = False, user=Depends(current_user),
-                      service: Service = Depends(svc)):
+    def notifications(
+        include_read: bool = False,
+        user=Depends(current_user),
+        service: Service = Depends(svc),
+    ):
         return rows(service.my_notifications(user, include_read))
 
     @api.post("/notifications/read")
@@ -295,6 +424,7 @@ def create_app(db_url=None, schema=None):
 
     # ---------- serve the built React app (production / single-port mode) ----------
     if FRONTEND_DIST.is_dir():
+
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str):
             if path.startswith("api/"):
